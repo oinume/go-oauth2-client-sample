@@ -24,12 +24,7 @@ func (s *server) index(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	t := s.parseHTMLTemplates("template/index.html")
 	if err := t.Execute(w, nil); err != nil {
-		// TODO: internalServerError
-		panic(err)
-		//internalServerError(w, errors.NewInternalError(
-		//	errors.WithError(err),
-		//	errors.WithMessage("Failed to template.Execute()"),
-		//), 0)
+		s.writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 }
@@ -50,4 +45,9 @@ func (s *server) parseHTMLTemplates(files ...string) *template.Template {
 	}
 	f = append(f, files...)
 	return template.Must(template.ParseFiles(f...))
+}
+
+func (s *server) writeError(w http.ResponseWriter, code int, err error) {
+	w.WriteHeader(code)
+	fmt.Fprint(w, err.Error())
 }
