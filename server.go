@@ -1,6 +1,8 @@
 package oauth2
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"html/template"
 	"net/http"
@@ -35,8 +37,11 @@ func (s *server) static(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	fmt.Printf("%v\n", r.URL.Path[1:])
-	fmt.Fprint(w, "authorize")
+	state := mustState()
+	//fmt.Printf("%v\n", r.URL.Path[1:])
+	fmt.Printf("state = %v\n", state)
+	fmt.Fprint(w, "authorize\n")
+	fmt.Fprint(w, state)
 }
 
 func (s *server) parseHTMLTemplates(files ...string) *template.Template {
@@ -50,4 +55,12 @@ func (s *server) parseHTMLTemplates(files ...string) *template.Template {
 func (s *server) writeError(w http.ResponseWriter, code int, err error) {
 	w.WriteHeader(code)
 	fmt.Fprint(w, err.Error())
+}
+
+func mustState() string {
+	b := make([]byte, 64)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	return base64.URLEncoding.EncodeToString(b)
 }
