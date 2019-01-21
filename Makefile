@@ -1,6 +1,7 @@
 APP = oauth2-client-sample
 BASE_DIR = github.com/oinume/go-oauth2-client-sample
 PID = $(APP).pid
+GO_TEST ?= go test -v -race
 
 all: build
 
@@ -23,3 +24,6 @@ restart: kill clean build
 
 watch: restart
 	fswatch -o -e ".*" -e vendor -i "\\.go$$" . | xargs -n1 -I{} make restart || make kill
+
+test:
+	$(GO_TEST) ./...

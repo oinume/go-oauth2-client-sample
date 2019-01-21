@@ -1,0 +1,47 @@
+version: 2
+
+env: &env
+
+gitconfig: &gitconfig
+  name: "Set .gitconfig"
+  command: |
+    echo "" > ~/.gitconfig
+    git config --global url."https://github.com".insteadOf git://github.com
+    git config --global http.https://gopkg.in.followRedirects true
+
+jobs:
+  test:
+    environment:
+      <<: *env
+    working_directory: /go/src/github.com/oinume/go-oauth2-client-sample
+    docker:
+      - image: golang:1.11-stretch
+        environment:
+          <<: *env
+    steps:
+      - checkout
+      - run:
+          <<: *gitconfig
+#      - run:
+#          name: "Run go-lint"
+#          command: make go-lint
+      - run:
+          name: "Run build"
+          command: make build
+      - run:
+          name: "Run test"
+          command: |
+            make test GO_TEST="go test -v -race -coverprofile=coverage.txt -covermode=atomic"
+      - run:
+          name: "Upload to codecov"
+          command: |
+            bash <(curl -s https://codecov.io/bash)
+
+workflows:
+  version: 2
+  build-workflow:
+    jobs:
+      - test:
+          filters:
+            branches:
+              only: /.*/
