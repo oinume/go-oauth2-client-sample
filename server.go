@@ -8,10 +8,16 @@ import (
 	"net/http"
 )
 
-type server struct{}
+type server struct {
+	clientID     string
+	clientSecret string
+}
 
-func NewServer() *server {
-	return &server{}
+func NewServer(clientID, clientSecret string) *server {
+	return &server{
+		clientID:     clientID,
+		clientSecret: clientSecret,
+	}
 }
 
 func (s *server) NewMux() *http.ServeMux {
