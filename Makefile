@@ -12,6 +12,9 @@ build:
 clean:
 	${RM} $(APP)
 
+run: build
+	bin/$(APP)
+
 kill:
 	kill `cat $(PID)` 2> /dev/null || true
 
