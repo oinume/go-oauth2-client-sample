@@ -1,7 +1,5 @@
 version: 2
 
-env: &env
-
 gitconfig: &gitconfig
   name: "Set .gitconfig"
   command: |
@@ -16,8 +14,6 @@ jobs:
     working_directory: /go/src/github.com/oinume/go-oauth2-client-sample
     docker:
       - image: golang:1.11-stretch
-        environment:
-          <<: *env
     steps:
       - checkout
       - run:
@@ -36,12 +32,3 @@ jobs:
           name: "Upload to codecov"
           command: |
             bash <(curl -s https://codecov.io/bash)
-
-workflows:
-  version: 2
-  build-workflow:
-    jobs:
-      - test:
-          filters:
-            branches:
-              only: /.*/
