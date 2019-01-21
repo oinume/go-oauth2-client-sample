@@ -8,7 +8,7 @@ gitconfig: &gitconfig
     git config --global http.https://gopkg.in.followRedirects true
 
 jobs:
-  test:
+  build:
     working_directory: /go/src/github.com/oinume/go-oauth2-client-sample
     docker:
       - image: golang:1.11-stretch
