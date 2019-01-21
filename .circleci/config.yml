@@ -9,8 +9,6 @@ gitconfig: &gitconfig
 
 jobs:
   test:
-    environment:
-      <<: *env
     working_directory: /go/src/github.com/oinume/go-oauth2-client-sample
     docker:
       - image: golang:1.11-stretch
