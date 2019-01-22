@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"net/url"
+	"strings"
 )
 
 type server struct {
@@ -44,6 +46,10 @@ func (s *server) static(w http.ResponseWriter, r *http.Request) {
 func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	state := mustState()
+	u, err := createAuthorizationRequestURL(state)
+	if err != nil {
+		// TODO: handling
+	}
 	//fmt.Printf("%v\n", r.URL.Path[1:])
 	fmt.Printf("state = %v\n", state)
 	fmt.Fprint(w, "authorize\n")
@@ -61,6 +67,31 @@ func (s *server) parseHTMLTemplates(files ...string) *template.Template {
 func (s *server) writeError(w http.ResponseWriter, code int, err error) {
 	w.WriteHeader(code)
 	fmt.Fprint(w, err.Error())
+}
+
+func (s *server) createAuthorizationRequestURL(
+	redirectURI string,
+	scopes []string,
+	state string,
+) (*url.URL, error) {
+	const endpoint = "https://accounts.google.com/o/oauth2/auth"
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return nil, err
+	}
+
+	q := u.Query()
+	q.Set("response_type", "code")
+	q.Set("client_id", s.clientID)
+	if redirectURI != "" {
+		q.Set("redirect_uri", redirectURI)
+	}
+	if len(scopes) > 0 {
+		q.Set("scope", strings.Join(scopes, " "))
+	}
+	q.Add("state", state)
+
+	return u, nil
 }
 
 func mustState() string {
