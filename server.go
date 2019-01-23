@@ -5,9 +5,11 @@ import (
 	"encoding/base64"
 	"fmt"
 	"html/template"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 type server struct {
@@ -49,11 +51,18 @@ func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
 	u, err := s.createAuthorizationRequestURL(redirectURI, []string{"email", "profile"}, state)
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, err)
+		return
 	}
-	//fmt.Fprint(w, "authorize\n")
-	//fmt.Fprint(w, state)
-	fmt.Printf("auth url = %v", u)
-	// TODO: set state to cookie
+	log.Printf("authorization request url = %v\n", u)
+
+	cookie := &http.Cookie{
+		Name:     "oauth2State",
+		Value:    state,
+		Path:     "/",
+		Expires:  time.Now().Add(10 * time.Minute),
+		HttpOnly: true,
+	}
+	http.SetCookie(w, cookie)
 
 	http.Redirect(w, r, u.String(), http.StatusFound)
 }
