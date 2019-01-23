@@ -44,16 +44,18 @@ func (s *server) static(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
+	const redirectURI = "http://localhost:2345/oauth2/callback"
 	state := mustState()
-	u, err := createAuthorizationRequestURL(state)
+	u, err := s.createAuthorizationRequestURL(redirectURI, []string{"email", "profile"}, state)
 	if err != nil {
-		// TODO: handling
+		s.writeError(w, http.StatusInternalServerError, err)
 	}
-	//fmt.Printf("%v\n", r.URL.Path[1:])
-	fmt.Printf("state = %v\n", state)
-	fmt.Fprint(w, "authorize\n")
-	fmt.Fprint(w, state)
+	//fmt.Fprint(w, "authorize\n")
+	//fmt.Fprint(w, state)
+	fmt.Printf("auth url = %v", u)
+	// TODO: set state to cookie
+
+	http.Redirect(w, r, u.String(), http.StatusFound)
 }
 
 func (s *server) parseHTMLTemplates(files ...string) *template.Template {
@@ -89,7 +91,8 @@ func (s *server) createAuthorizationRequestURL(
 	if len(scopes) > 0 {
 		q.Set("scope", strings.Join(scopes, " "))
 	}
-	q.Add("state", state)
+	q.Set("state", state)
+	u.RawQuery = q.Encode()
 
 	return u, nil
 }
