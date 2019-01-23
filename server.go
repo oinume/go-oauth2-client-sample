@@ -48,7 +48,12 @@ func (s *server) static(w http.ResponseWriter, r *http.Request) {
 func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
 	const redirectURI = "http://localhost:2345/oauth2/callback"
 	state := mustState()
-	u, err := s.createAuthorizationRequestURL(redirectURI, []string{"email", "profile"}, state)
+	scopes := []string{
+		"email",
+		"profile",
+		"https://www.googleapis.com/auth/urlshortener",
+	}
+	u, err := s.createAuthorizationRequestURL(redirectURI, scopes, state)
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, err)
 		return
@@ -101,6 +106,7 @@ func (s *server) createAuthorizationRequestURL(
 		q.Set("scope", strings.Join(scopes, " "))
 	}
 	q.Set("state", state)
+	q.Set("prompt", "consent")
 	u.RawQuery = q.Encode()
 
 	return u, nil
