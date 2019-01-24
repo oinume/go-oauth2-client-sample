@@ -51,7 +51,7 @@ func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
 	scopes := []string{
 		"email",
 		"profile",
-		"https://www.googleapis.com/auth/urlshortener",
+		"https://www.googleapis.com/auth/gmail.readonly",
 	}
 	u, err := s.createAuthorizationRequestURL(redirectURI, scopes, state)
 	if err != nil {
