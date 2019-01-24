@@ -26,6 +26,7 @@ func NewServer(clientID, clientSecret string) *server {
 
 func (s *server) NewMux() *http.ServeMux {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth2/callback", s.callback)
 	mux.HandleFunc("/oauth2/authorize", s.authorize)
 	mux.HandleFunc("/static/", s.static)
 	mux.HandleFunc("/", s.index)
@@ -70,6 +71,10 @@ func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, cookie)
 
 	http.Redirect(w, r, u.String(), http.StatusFound)
+}
+
+func (s *server) callback(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
 }
 
 func (s *server) parseHTMLTemplates(files ...string) *template.Template {
