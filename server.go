@@ -5,13 +5,23 @@ import (
 	"encoding/base64"
 	"fmt"
 	"html/template"
+	"log"
 	"net/http"
+	"net/url"
+	"strings"
+	"time"
 )
 
-type server struct{}
+type server struct {
+	clientID     string
+	clientSecret string
+}
 
-func NewServer() *server {
-	return &server{}
+func NewServer(clientID, clientSecret string) *server {
+	return &server{
+		clientID:     clientID,
+		clientSecret: clientSecret,
+	}
 }
 
 func (s *server) NewMux() *http.ServeMux {
@@ -36,12 +46,30 @@ func (s *server) static(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
+	const redirectURI = "http://localhost:2345/oauth2/callback"
 	state := mustState()
-	//fmt.Printf("%v\n", r.URL.Path[1:])
-	fmt.Printf("state = %v\n", state)
-	fmt.Fprint(w, "authorize\n")
-	fmt.Fprint(w, state)
+	scopes := []string{
+		"email",
+		"profile",
+		"https://www.googleapis.com/auth/gmail.readonly",
+	}
+	u, err := s.createAuthorizationRequestURL(redirectURI, scopes, state)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	log.Printf("authorization request url = %v\n", u)
+
+	cookie := &http.Cookie{
+		Name:     "oauth2State",
+		Value:    state,
+		Path:     "/",
+		Expires:  time.Now().Add(10 * time.Minute),
+		HttpOnly: true,
+	}
+	http.SetCookie(w, cookie)
+
+	http.Redirect(w, r, u.String(), http.StatusFound)
 }
 
 func (s *server) parseHTMLTemplates(files ...string) *template.Template {
@@ -55,6 +83,33 @@ func (s *server) parseHTMLTemplates(files ...string) *template.Template {
 func (s *server) writeError(w http.ResponseWriter, code int, err error) {
 	w.WriteHeader(code)
 	fmt.Fprint(w, err.Error())
+}
+
+func (s *server) createAuthorizationRequestURL(
+	redirectURI string,
+	scopes []string,
+	state string,
+) (*url.URL, error) {
+	const endpoint = "https://accounts.google.com/o/oauth2/auth"
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return nil, err
+	}
+
+	q := u.Query()
+	q.Set("response_type", "code")
+	q.Set("client_id", s.clientID)
+	if redirectURI != "" {
+		q.Set("redirect_uri", redirectURI)
+	}
+	if len(scopes) > 0 {
+		q.Set("scope", strings.Join(scopes, " "))
+	}
+	q.Set("state", state)
+	q.Set("prompt", "consent")
+	u.RawQuery = q.Encode()
+
+	return u, nil
 }
 
 func mustState() string {
