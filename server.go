@@ -1,20 +1,43 @@
 package oauth2
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"html/template"
+	"io/ioutil"
 	"log"
+	"mime"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
+)
+
+const (
+	stateCookieName = "oauthState"
+	redirectURI     = "http://localhost:2345/oauth2/callback"
+)
+
+var (
+	errAccessDenied = fmt.Errorf("oauth2: access_denied")
+	errUnknown      = fmt.Errorf("oauth2: unknown error")
 )
 
 type server struct {
 	clientID     string
 	clientSecret string
+}
+
+type token struct {
+	AccessToken  string `json:"access_token"`
+	TokenType    string `json:"token_type"`
+	RefreshToken string `json:"refresh_token"`
+	ExpiresIn    int    `json:"expires_in"`
+	expiry       time.Time
 }
 
 func NewServer(clientID, clientSecret string) *server {
@@ -47,7 +70,6 @@ func (s *server) static(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
-	const redirectURI = "http://localhost:2345/oauth2/callback"
 	state := mustState()
 	scopes := []string{
 		"email",
@@ -62,7 +84,7 @@ func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
 	log.Printf("authorization request url = %v\n", u)
 
 	cookie := &http.Cookie{
-		Name:     "oauth2State",
+		Name:     stateCookieName,
 		Value:    state,
 		Path:     "/",
 		Expires:  time.Now().Add(10 * time.Minute),
@@ -74,7 +96,27 @@ func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) callback(w http.ResponseWriter, r *http.Request) {
+	if err := checkState(r); err != nil {
+		s.writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	cancel()
+	tk, err := s.exchange(ctx, r)
+	if err != nil {
+		if err == errAccessDenied {
+			// TODO: show error?
+			http.Redirect(w, r, "/", http.StatusFound)
+			return
+		}
+		s.writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, "accessToken = %v", tk.AccessToken)
+	// save tk to database or do something
 }
 
 func (s *server) parseHTMLTemplates(files ...string) *template.Template {
@@ -123,4 +165,105 @@ func mustState() string {
 		panic(err)
 	}
 	return base64.URLEncoding.EncodeToString(b)
+}
+
+func checkState(r *http.Request) error {
+	state := r.FormValue("state")
+	oauthState, err := r.Cookie(stateCookieName)
+	if err != nil {
+		return fmt.Errorf("failed to get cookie %v", stateCookieName)
+	}
+	if state != oauthState.Value {
+		return fmt.Errorf("state doesn't match")
+	}
+	return nil
+}
+
+func (s *server) exchange(ctx context.Context, r *http.Request) (*token, error) {
+	if e := r.FormValue("error"); e != "" {
+		switch e {
+		case "access_denied":
+			return nil, errAccessDenied
+		default:
+			return nil, errUnknown
+		}
+	}
+
+	code := r.FormValue("code")
+	// TODO: check code exists
+	tk, err := s.retrieveToken(ctx, code, redirectURI)
+	if err != nil {
+		return nil, err
+	}
+
+	return tk, nil
+}
+
+func (s *server) retrieveToken(ctx context.Context, code, redirectURI string) (*token, error) {
+	v := url.Values{
+		"grant_type": {"authorization_code"},
+		"code":       {code},
+	}
+	if redirectURI != "" {
+		v.Set("redirect_uri", redirectURI)
+	}
+
+	const tokenEndpoint = "https://accounts.google.com/o/oauth2/token"
+	v.Set("client_id", s.clientID)
+	v.Set("client_secret", s.clientSecret) // need this? there is no spec on OAuth2.0
+	req, err := http.NewRequest("POST", tokenEndpoint, strings.NewReader(v.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	// https://tools.ietf.org/html/rfc6749#section-4.1.3
+	// Client authentication
+	req.SetBasicAuth(url.QueryEscape(s.clientID), url.QueryEscape(s.clientSecret))
+	resp, err := http.DefaultClient.Do(req.WithContext(ctx))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("oauth2: cannot fetch token: %v", err)
+	}
+	if code := resp.StatusCode; code < 200 || code > 299 {
+		return nil, fmt.Errorf("token request failed: statusCode=%v", code)
+	}
+
+	var tk *token
+	content, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse Content-Type header: %v", err)
+	}
+	switch content {
+	// TODO: need to support this mime type?
+	case "application/x-www-form-urlencoded", "text/plain":
+		vals, err := url.ParseQuery(string(body))
+		if err != nil {
+			return nil, err
+		}
+		tk = &token{
+			AccessToken:  vals.Get("access_token"),
+			TokenType:    vals.Get("token_type"),
+			RefreshToken: vals.Get("refresh_token"),
+			//Raw:          vals,
+		}
+		e := vals.Get("expires_in")
+		expires, _ := strconv.Atoi(e)
+		if expires != 0 {
+			tk.expiry = time.Now().Add(time.Duration(expires) * time.Second)
+		}
+	default:
+		tk = &token{}
+		if err = json.Unmarshal(body, tk); err != nil {
+			return nil, err
+		}
+	}
+	if tk.AccessToken == "" {
+		return nil, fmt.Errorf("oauth2: server response missing access_token")
+	}
+	return tk, nil
 }
