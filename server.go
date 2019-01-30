@@ -96,13 +96,15 @@ func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) callback(w http.ResponseWriter, r *http.Request) {
+	log.Printf("callback: state=%v, code=%v", r.FormValue("state"), r.FormValue("code"))
+
 	if err := checkState(r); err != nil {
 		s.writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	cancel()
+	defer cancel()
 	tk, err := s.exchange(ctx, r)
 	if err != nil {
 		if err == errAccessDenied {
