@@ -98,6 +98,11 @@ func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
 func (s *server) callback(w http.ResponseWriter, r *http.Request) {
 	log.Printf("callback: state=%v, code=%v", r.FormValue("state"), r.FormValue("code"))
 
+	if e := r.FormValue("error"); e != "" {
+		s.writeError(w, http.StatusInternalServerError, fmt.Errorf("error returned in authorization: %v", e))
+		return
+	}
+
 	if err := checkState(r); err != nil {
 		s.writeError(w, http.StatusInternalServerError, err)
 		return
@@ -107,11 +112,6 @@ func (s *server) callback(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	tk, err := s.exchange(ctx, r)
 	if err != nil {
-		if err == errAccessDenied {
-			// TODO: show error?
-			http.Redirect(w, r, "/", http.StatusFound)
-			return
-		}
 		s.writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -182,15 +182,6 @@ func checkState(r *http.Request) error {
 }
 
 func (s *server) exchange(ctx context.Context, r *http.Request) (*token, error) {
-	if e := r.FormValue("error"); e != "" {
-		switch e {
-		case "access_denied":
-			return nil, errAccessDenied
-		default:
-			return nil, errUnknown
-		}
-	}
-
 	code := r.FormValue("code")
 	// TODO: check code exists
 	tk, err := s.retrieveToken(ctx, code, redirectURI)
