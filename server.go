@@ -22,17 +22,12 @@ const (
 	redirectURI     = "http://localhost:2345/oauth2/callback"
 )
 
-var (
-	errAccessDenied = fmt.Errorf("oauth2: access_denied")
-	errUnknown      = fmt.Errorf("oauth2: unknown error")
-)
-
 type server struct {
 	clientID     string
 	clientSecret string
 }
 
-type token struct {
+type tokenEntity struct {
 	AccessToken  string `json:"access_token"`
 	TokenType    string `json:"token_type"`
 	RefreshToken string `json:"refresh_token"`
@@ -63,6 +58,14 @@ func (s *server) index(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+}
+
+func (s *server) parseHTMLTemplates(files ...string) *template.Template {
+	f := []string{
+		"template/_base.html",
+	}
+	f = append(f, files...)
+	return template.Must(template.ParseFiles(f...))
 }
 
 func (s *server) static(w http.ResponseWriter, r *http.Request) {
@@ -121,19 +124,6 @@ func (s *server) callback(w http.ResponseWriter, r *http.Request) {
 	// save tk to database or do something
 }
 
-func (s *server) parseHTMLTemplates(files ...string) *template.Template {
-	f := []string{
-		"template/_base.html",
-	}
-	f = append(f, files...)
-	return template.Must(template.ParseFiles(f...))
-}
-
-func (s *server) writeError(w http.ResponseWriter, code int, err error) {
-	w.WriteHeader(code)
-	fmt.Fprint(w, err.Error())
-}
-
 func (s *server) createAuthorizationRequestURL(
 	redirectURI string,
 	scopes []string,
@@ -181,7 +171,7 @@ func checkState(r *http.Request) error {
 	return nil
 }
 
-func (s *server) exchange(ctx context.Context, r *http.Request) (*token, error) {
+func (s *server) exchange(ctx context.Context, r *http.Request) (*tokenEntity, error) {
 	code := r.FormValue("code")
 	// TODO: check code exists
 	tk, err := s.retrieveToken(ctx, code, redirectURI)
@@ -192,7 +182,7 @@ func (s *server) exchange(ctx context.Context, r *http.Request) (*token, error) 
 	return tk, nil
 }
 
-func (s *server) retrieveToken(ctx context.Context, code, redirectURI string) (*token, error) {
+func (s *server) retrieveToken(ctx context.Context, code, redirectURI string) (*tokenEntity, error) {
 	v := url.Values{
 		"grant_type": {"authorization_code"},
 		"code":       {code},
@@ -201,7 +191,7 @@ func (s *server) retrieveToken(ctx context.Context, code, redirectURI string) (*
 		v.Set("redirect_uri", redirectURI)
 	}
 
-	const tokenEndpoint = "https://accounts.google.com/o/oauth2/token"
+	const tokenEndpoint = "https://accounts.google.com/o/oauth2/tokenEntity"
 	v.Set("client_id", s.clientID)
 	v.Set("client_secret", s.clientSecret) // need this? there is no spec on OAuth2.0
 	req, err := http.NewRequest("POST", tokenEndpoint, strings.NewReader(v.Encode()))
@@ -220,13 +210,13 @@ func (s *server) retrieveToken(ctx context.Context, code, redirectURI string) (*
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("oauth2: cannot fetch token: %v", err)
+		return nil, fmt.Errorf("oauth2: cannot fetch tokenEntity: %v", err)
 	}
 	if code := resp.StatusCode; code < 200 || code > 299 {
-		return nil, fmt.Errorf("token request failed: statusCode=%v", code)
+		return nil, fmt.Errorf("tokenEntity request failed: statusCode=%v", code)
 	}
 
-	var tk *token
+	var token *tokenEntity
 	content, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse Content-Type header: %v", err)
@@ -238,7 +228,7 @@ func (s *server) retrieveToken(ctx context.Context, code, redirectURI string) (*
 		if err != nil {
 			return nil, err
 		}
-		tk = &token{
+		token = &tokenEntity{
 			AccessToken:  vals.Get("access_token"),
 			TokenType:    vals.Get("token_type"),
 			RefreshToken: vals.Get("refresh_token"),
@@ -247,16 +237,21 @@ func (s *server) retrieveToken(ctx context.Context, code, redirectURI string) (*
 		e := vals.Get("expires_in")
 		expires, _ := strconv.Atoi(e)
 		if expires != 0 {
-			tk.expiry = time.Now().Add(time.Duration(expires) * time.Second)
+			token.expiry = time.Now().Add(time.Duration(expires) * time.Second)
 		}
 	default:
-		tk = &token{}
-		if err = json.Unmarshal(body, tk); err != nil {
+		token = &tokenEntity{}
+		if err = json.Unmarshal(body, token); err != nil {
 			return nil, err
 		}
 	}
-	if tk.AccessToken == "" {
+	if token.AccessToken == "" {
 		return nil, fmt.Errorf("oauth2: server response missing access_token")
 	}
-	return tk, nil
+	return token, nil
+}
+
+func (s *server) writeError(w http.ResponseWriter, code int, err error) {
+	w.WriteHeader(code)
+	fmt.Fprint(w, err.Error())
 }
