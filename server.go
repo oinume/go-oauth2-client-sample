@@ -18,8 +18,18 @@ import (
 )
 
 const (
-	stateCookieName = "oauthState"
-	redirectURI     = "http://localhost:2345/oauth2/callback"
+	authorizationEndpoint = "https://accounts.google.com/o/oauth2/auth"
+	tokenEndpoint         = "https://accounts.google.com/o/oauth2/token"
+	stateCookieName       = "oauthState"
+	redirectURI           = "http://localhost:2345/oauth2/callback"
+)
+
+var (
+	scopes = []string{
+		"email",
+		"profile",
+		"https://www.googleapis.com/auth/gmail.readonly",
+	}
 )
 
 type server struct {
@@ -51,33 +61,11 @@ func (s *server) NewMux() *http.ServeMux {
 	return mux
 }
 
-func (s *server) index(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	t := s.parseHTMLTemplates("template/index.html")
-	if err := t.Execute(w, nil); err != nil {
+func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
+	state, err := generateState()
+	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, err)
 		return
-	}
-}
-
-func (s *server) parseHTMLTemplates(files ...string) *template.Template {
-	f := []string{
-		"template/_base.html",
-	}
-	f = append(f, files...)
-	return template.Must(template.ParseFiles(f...))
-}
-
-func (s *server) static(w http.ResponseWriter, r *http.Request) {
-	http.ServeFile(w, r, r.URL.Path[1:])
-}
-
-func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
-	state := mustState()
-	scopes := []string{
-		"email",
-		"profile",
-		"https://www.googleapis.com/auth/gmail.readonly",
 	}
 	u, err := s.createAuthorizationRequestURL(redirectURI, scopes, state)
 	if err != nil {
@@ -86,6 +74,7 @@ func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("authorization request url = %v\n", u)
 
+	// Set state to cookie
 	cookie := &http.Cookie{
 		Name:     stateCookieName,
 		Value:    state,
@@ -95,6 +84,7 @@ func (s *server) authorize(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, cookie)
 
+	// Send authorization request by redirection
 	http.Redirect(w, r, u.String(), http.StatusFound)
 }
 
@@ -102,7 +92,7 @@ func (s *server) callback(w http.ResponseWriter, r *http.Request) {
 	log.Printf("callback: state=%v, code=%v", r.FormValue("state"), r.FormValue("code"))
 
 	if e := r.FormValue("error"); e != "" {
-		s.writeError(w, http.StatusInternalServerError, fmt.Errorf("error returned in authorization: %v", e))
+		s.writeError(w, http.StatusBadRequest, fmt.Errorf("error returned in authorization: %v", e))
 		return
 	}
 
@@ -129,8 +119,7 @@ func (s *server) createAuthorizationRequestURL(
 	scopes []string,
 	state string,
 ) (*url.URL, error) {
-	const endpoint = "https://accounts.google.com/o/oauth2/auth"
-	u, err := url.Parse(endpoint)
+	u, err := url.Parse(authorizationEndpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -151,12 +140,12 @@ func (s *server) createAuthorizationRequestURL(
 	return u, nil
 }
 
-func mustState() string {
+func generateState() (string, error) {
 	b := make([]byte, 64)
 	if _, err := rand.Read(b); err != nil {
-		panic(err)
+		return "", fmt.Errorf("failed to generate state: %v", err)
 	}
-	return base64.URLEncoding.EncodeToString(b)
+	return base64.URLEncoding.EncodeToString(b), nil
 }
 
 func checkState(r *http.Request) error {
@@ -173,7 +162,9 @@ func checkState(r *http.Request) error {
 
 func (s *server) exchange(ctx context.Context, r *http.Request) (*tokenEntity, error) {
 	code := r.FormValue("code")
-	// TODO: check code exists
+	if code == "" {
+		return nil, fmt.Errorf("code is required")
+	}
 	tk, err := s.retrieveToken(ctx, code, redirectURI)
 	if err != nil {
 		return nil, err
@@ -191,7 +182,6 @@ func (s *server) retrieveToken(ctx context.Context, code, redirectURI string) (*
 		v.Set("redirect_uri", redirectURI)
 	}
 
-	const tokenEndpoint = "https://accounts.google.com/o/oauth2/tokenEntity"
 	v.Set("client_id", s.clientID)
 	v.Set("client_secret", s.clientSecret) // need this? there is no spec on OAuth2.0
 	req, err := http.NewRequest("POST", tokenEndpoint, strings.NewReader(v.Encode()))
@@ -251,7 +241,28 @@ func (s *server) retrieveToken(ctx context.Context, code, redirectURI string) (*
 	return token, nil
 }
 
+func (s *server) index(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	t := s.parseHTMLTemplates("template/index.html")
+	if err := t.Execute(w, nil); err != nil {
+		s.writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+}
+
+func (s *server) static(w http.ResponseWriter, r *http.Request) {
+	http.ServeFile(w, r, r.URL.Path[1:])
+}
+
 func (s *server) writeError(w http.ResponseWriter, code int, err error) {
 	w.WriteHeader(code)
 	fmt.Fprint(w, err.Error())
+}
+
+func (s *server) parseHTMLTemplates(files ...string) *template.Template {
+	f := []string{
+		"template/_base.html",
+	}
+	f = append(f, files...)
+	return template.Must(template.ParseFiles(f...))
 }
