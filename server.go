@@ -27,7 +27,6 @@ const (
 var (
 	scopes = []string{
 		"email",
-		"profile",
 		"https://www.googleapis.com/auth/gmail.readonly",
 	}
 )
