@@ -94,15 +94,19 @@ func (s *server) callback(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusBadRequest, fmt.Errorf("error returned in authorization: %v", e))
 		return
 	}
-
-	if err := checkState(r); err != nil {
-		s.writeError(w, http.StatusInternalServerError, err)
+	if err := validateState(r); err != nil {
+		s.writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	code := r.FormValue("code")
+	if code == "" {
+		s.writeError(w, http.StatusBadRequest, fmt.Errorf("code is required"))
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	token, err := s.exchange(ctx, r)
+	token, err := s.exchange(ctx, code)
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, err)
 		return
@@ -147,7 +151,7 @@ func generateState() (string, error) {
 	return base64.URLEncoding.EncodeToString(b), nil
 }
 
-func checkState(r *http.Request) error {
+func validateState(r *http.Request) error {
 	state := r.FormValue("state")
 	oauthState, err := r.Cookie(stateCookieName)
 	if err != nil {
@@ -159,39 +163,23 @@ func checkState(r *http.Request) error {
 	return nil
 }
 
-func (s *server) exchange(ctx context.Context, r *http.Request) (*tokenEntity, error) {
-	code := r.FormValue("code")
-	if code == "" {
-		return nil, fmt.Errorf("code is required")
-	}
-	
-	token, err := s.retrieveToken(ctx, code, redirectURI)
-	if err != nil {
-		return nil, err
-	}
-
-	return token, nil
-}
-
-func (s *server) retrieveToken(ctx context.Context, code, redirectURI string) (*tokenEntity, error) {
+func (s *server) exchange(ctx context.Context, code string) (*tokenEntity, error) {
 	v := url.Values{
-		"grant_type": {"authorization_code"},
-		"code":       {code},
+		"grant_type":    {"authorization_code"},
+		"code":          {code},
+		"redirect_uri":  {redirectURI},
+		"client_id":     {s.clientID},
+		"client_secret": {s.clientSecret}, // need this? there is no spec on OAuth2.0
 	}
-	if redirectURI != "" {
-		v.Set("redirect_uri", redirectURI)
-	}
-
-	v.Set("client_id", s.clientID)
-	v.Set("client_secret", s.clientSecret) // need this? there is no spec on OAuth2.0
 	req, err := http.NewRequest("POST", tokenEndpoint, strings.NewReader(v.Encode()))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	// https://tools.ietf.org/html/rfc6749#section-4.1.3
-	// Client authentication
+	// Client authentication: https://tools.ietf.org/html/rfc6749#section-4.1.3
 	req.SetBasicAuth(url.QueryEscape(s.clientID), url.QueryEscape(s.clientSecret))
+
+	// Send token request
 	resp, err := http.DefaultClient.Do(req.WithContext(ctx))
 	if err != nil {
 		return nil, err
@@ -200,16 +188,18 @@ func (s *server) retrieveToken(ctx context.Context, code, redirectURI string) (*
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("oauth2: cannot fetch tokenEntity: %v", err)
+		return nil, fmt.Errorf("oauth2: cannot fetch token: %v", err)
 	}
 	if code := resp.StatusCode; code < 200 || code > 299 {
-		return nil, fmt.Errorf("tokenEntity request failed: statusCode=%v", code)
+		log.Printf("token request failed: statusCode=%v, body=%v\n", code, string(body))
+		return nil, fmt.Errorf("oauth2: token request failed: statusCode=%v", code)
 	}
 
+	// Create tokenEntity from response
 	var token *tokenEntity
 	content, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse Content-Type header: %v", err)
+		return nil, fmt.Errorf("oauth2: failed to parse Content-Type header: %v", err)
 	}
 	switch content {
 	// TODO: need to support this mime type?
