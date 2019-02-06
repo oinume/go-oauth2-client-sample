@@ -102,15 +102,15 @@ func (s *server) callback(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	tk, err := s.exchange(ctx, r)
+	token, err := s.exchange(ctx, r)
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "accessToken = %v", tk.AccessToken)
-	// save tk to database or do something
+	fmt.Fprintf(w, "accessToken = %v", token.AccessToken)
+	// save token to database or do something
 }
 
 func (s *server) createAuthorizationRequestURL(
@@ -164,12 +164,13 @@ func (s *server) exchange(ctx context.Context, r *http.Request) (*tokenEntity, e
 	if code == "" {
 		return nil, fmt.Errorf("code is required")
 	}
-	tk, err := s.retrieveToken(ctx, code, redirectURI)
+	
+	token, err := s.retrieveToken(ctx, code, redirectURI)
 	if err != nil {
 		return nil, err
 	}
 
-	return tk, nil
+	return token, nil
 }
 
 func (s *server) retrieveToken(ctx context.Context, code, redirectURI string) (*tokenEntity, error) {
