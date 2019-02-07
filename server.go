@@ -213,10 +213,11 @@ func (s *server) exchange(ctx context.Context, code string) (*tokenEntity, error
 			RefreshToken: vals.Get("refresh_token"),
 		}
 		e := vals.Get("expires_in")
-		expires, _ := strconv.Atoi(e)
-		if expires != 0 {
-			token.expiry = time.Now().Add(time.Duration(expires) * time.Second)
+		expiresIn, err := strconv.Atoi(e)
+		if err != nil {
+			return nil, err
 		}
+		token.ExpiresIn = expiresIn
 	case "application/json":
 		token = &tokenEntity{}
 		if err = json.Unmarshal(body, token); err != nil {
@@ -227,6 +228,10 @@ func (s *server) exchange(ctx context.Context, code string) (*tokenEntity, error
 	}
 	if token.AccessToken == "" {
 		return nil, fmt.Errorf("oauth2: server response missing access_token")
+	}
+
+	if token.ExpiresIn != 0 {
+		token.expiry = time.Now().Add(time.Duration(token.ExpiresIn) * time.Second)
 	}
 
 	return token, nil
