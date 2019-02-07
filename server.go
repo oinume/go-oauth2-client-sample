@@ -165,11 +165,10 @@ func validateState(r *http.Request) error {
 
 func (s *server) exchange(ctx context.Context, code string) (*tokenEntity, error) {
 	v := url.Values{
-		"grant_type":    {"authorization_code"},
-		"code":          {code},
-		"redirect_uri":  {redirectURI},
-		"client_id":     {s.clientID},
-		"client_secret": {s.clientSecret}, // need this? there is no spec on OAuth2.0
+		"grant_type":   {"authorization_code"},
+		"code":         {code},
+		"redirect_uri": {redirectURI},
+		"client_id":    {s.clientID},
 	}
 	req, err := http.NewRequest("POST", tokenEndpoint, strings.NewReader(v.Encode()))
 	if err != nil {
