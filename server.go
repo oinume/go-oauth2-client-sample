@@ -197,11 +197,11 @@ func (s *server) exchange(ctx context.Context, code string) (*tokenEntity, error
 
 	// Create tokenEntity from response
 	var token *tokenEntity
-	content, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	contentType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if err != nil {
 		return nil, fmt.Errorf("oauth2: failed to parse Content-Type header: %v", err)
 	}
-	switch content {
+	switch contentType {
 	// TODO: need to support this mime type?
 	case "application/x-www-form-urlencoded", "text/plain":
 		vals, err := url.ParseQuery(string(body))
@@ -212,22 +212,24 @@ func (s *server) exchange(ctx context.Context, code string) (*tokenEntity, error
 			AccessToken:  vals.Get("access_token"),
 			TokenType:    vals.Get("token_type"),
 			RefreshToken: vals.Get("refresh_token"),
-			//Raw:          vals,
 		}
 		e := vals.Get("expires_in")
 		expires, _ := strconv.Atoi(e)
 		if expires != 0 {
 			token.expiry = time.Now().Add(time.Duration(expires) * time.Second)
 		}
-	default:
+	case "application/json":
 		token = &tokenEntity{}
 		if err = json.Unmarshal(body, token); err != nil {
 			return nil, err
 		}
+	default:
+		return nil, fmt.Errorf("oauth2: invalid Content-Type in response: %v", contentType)
 	}
 	if token.AccessToken == "" {
 		return nil, fmt.Errorf("oauth2: server response missing access_token")
 	}
+
 	return token, nil
 }
 
