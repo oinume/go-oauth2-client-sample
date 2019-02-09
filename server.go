@@ -12,7 +12,6 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -91,6 +90,7 @@ func (s *server) callback(w http.ResponseWriter, r *http.Request) {
 	log.Printf("callback: state=%v, code=%v", r.FormValue("state"), r.FormValue("code"))
 
 	if e := r.FormValue("error"); e != "" {
+		// Should handler error correctly as described in https://tools.ietf.org/html/rfc6749#section-4.2.2.1
 		s.writeError(w, http.StatusBadRequest, fmt.Errorf("error returned in authorization: %v", e))
 		return
 	}
@@ -190,6 +190,7 @@ func (s *server) exchange(ctx context.Context, code string) (*tokenEntity, error
 		return nil, fmt.Errorf("oauth2: cannot fetch token: %v", err)
 	}
 	if code := resp.StatusCode; code < 200 || code > 299 {
+		// Should handler error correctly as described in https://tools.ietf.org/html/rfc6749#section-5.2
 		log.Printf("token request failed: statusCode=%v, body=%v\n", code, string(body))
 		return nil, fmt.Errorf("oauth2: token request failed: statusCode=%v", code)
 	}
@@ -200,36 +201,13 @@ func (s *server) exchange(ctx context.Context, code string) (*tokenEntity, error
 	if err != nil {
 		return nil, fmt.Errorf("oauth2: failed to parse Content-Type header: %v", err)
 	}
-	switch contentType {
-	// TODO: need to support this mime type?
-	case "application/x-www-form-urlencoded", "text/plain":
-		vals, err := url.ParseQuery(string(body))
-		if err != nil {
-			return nil, err
-		}
-		token = &tokenEntity{
-			AccessToken:  vals.Get("access_token"),
-			TokenType:    vals.Get("token_type"),
-			RefreshToken: vals.Get("refresh_token"),
-		}
-		e := vals.Get("expires_in")
-		expiresIn, err := strconv.Atoi(e)
-		if err != nil {
-			return nil, err
-		}
-		token.ExpiresIn = expiresIn
-	case "application/json":
-		token = &tokenEntity{}
-		if err = json.Unmarshal(body, token); err != nil {
-			return nil, err
-		}
-	default:
+	if contentType != "application/json" {
 		return nil, fmt.Errorf("oauth2: invalid Content-Type in response: %v", contentType)
 	}
-	if token.AccessToken == "" {
-		return nil, fmt.Errorf("oauth2: server response missing access_token")
+	token = &tokenEntity{}
+	if err = json.Unmarshal(body, token); err != nil {
+		return nil, err
 	}
-
 	if token.ExpiresIn != 0 {
 		token.expiry = time.Now().Add(time.Duration(token.ExpiresIn) * time.Second)
 	}
