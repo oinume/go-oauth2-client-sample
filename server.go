@@ -12,7 +12,6 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -91,26 +90,31 @@ func (s *server) callback(w http.ResponseWriter, r *http.Request) {
 	log.Printf("callback: state=%v, code=%v", r.FormValue("state"), r.FormValue("code"))
 
 	if e := r.FormValue("error"); e != "" {
+		// Should handler error correctly as described in https://tools.ietf.org/html/rfc6749#section-4.2.2.1
 		s.writeError(w, http.StatusBadRequest, fmt.Errorf("error returned in authorization: %v", e))
 		return
 	}
-
-	if err := checkState(r); err != nil {
-		s.writeError(w, http.StatusInternalServerError, err)
+	if err := validateState(r); err != nil {
+		s.writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	code := r.FormValue("code")
+	if code == "" {
+		s.writeError(w, http.StatusBadRequest, fmt.Errorf("code is required"))
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	tk, err := s.exchange(ctx, r)
+	token, err := s.exchange(ctx, code)
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, "accessToken = %v", tk.AccessToken)
-	// save tk to database or do something
+	fmt.Fprintf(w, "accessToken = %v", token.AccessToken)
+	// save token to database or do something
 }
 
 func (s *server) createAuthorizationRequestURL(
@@ -147,7 +151,7 @@ func generateState() (string, error) {
 	return base64.URLEncoding.EncodeToString(b), nil
 }
 
-func checkState(r *http.Request) error {
+func validateState(r *http.Request) error {
 	state := r.FormValue("state")
 	oauthState, err := r.Cookie(stateCookieName)
 	if err != nil {
@@ -159,38 +163,22 @@ func checkState(r *http.Request) error {
 	return nil
 }
 
-func (s *server) exchange(ctx context.Context, r *http.Request) (*tokenEntity, error) {
-	code := r.FormValue("code")
-	if code == "" {
-		return nil, fmt.Errorf("code is required")
-	}
-	tk, err := s.retrieveToken(ctx, code, redirectURI)
-	if err != nil {
-		return nil, err
-	}
-
-	return tk, nil
-}
-
-func (s *server) retrieveToken(ctx context.Context, code, redirectURI string) (*tokenEntity, error) {
+func (s *server) exchange(ctx context.Context, code string) (*tokenEntity, error) {
 	v := url.Values{
-		"grant_type": {"authorization_code"},
-		"code":       {code},
+		"grant_type":   {"authorization_code"},
+		"code":         {code},
+		"redirect_uri": {redirectURI},
+		"client_id":    {s.clientID},
 	}
-	if redirectURI != "" {
-		v.Set("redirect_uri", redirectURI)
-	}
-
-	v.Set("client_id", s.clientID)
-	v.Set("client_secret", s.clientSecret) // need this? there is no spec on OAuth2.0
 	req, err := http.NewRequest("POST", tokenEndpoint, strings.NewReader(v.Encode()))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	// https://tools.ietf.org/html/rfc6749#section-4.1.3
-	// Client authentication
+	// Client authentication: https://tools.ietf.org/html/rfc6749#section-4.1.3
 	req.SetBasicAuth(url.QueryEscape(s.clientID), url.QueryEscape(s.clientSecret))
+
+	// Send token request
 	resp, err := http.DefaultClient.Do(req.WithContext(ctx))
 	if err != nil {
 		return nil, err
@@ -199,44 +187,31 @@ func (s *server) retrieveToken(ctx context.Context, code, redirectURI string) (*
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("oauth2: cannot fetch tokenEntity: %v", err)
+		return nil, fmt.Errorf("oauth2: cannot fetch token: %v", err)
 	}
 	if code := resp.StatusCode; code < 200 || code > 299 {
-		return nil, fmt.Errorf("tokenEntity request failed: statusCode=%v", code)
+		// Should handler error correctly as described in https://tools.ietf.org/html/rfc6749#section-5.2
+		log.Printf("token request failed: statusCode=%v, body=%v\n", code, string(body))
+		return nil, fmt.Errorf("oauth2: token request failed: statusCode=%v", code)
 	}
 
+	// Create tokenEntity from response
 	var token *tokenEntity
-	content, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	contentType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse Content-Type header: %v", err)
+		return nil, fmt.Errorf("oauth2: failed to parse Content-Type header: %v", err)
 	}
-	switch content {
-	// TODO: need to support this mime type?
-	case "application/x-www-form-urlencoded", "text/plain":
-		vals, err := url.ParseQuery(string(body))
-		if err != nil {
-			return nil, err
-		}
-		token = &tokenEntity{
-			AccessToken:  vals.Get("access_token"),
-			TokenType:    vals.Get("token_type"),
-			RefreshToken: vals.Get("refresh_token"),
-			//Raw:          vals,
-		}
-		e := vals.Get("expires_in")
-		expires, _ := strconv.Atoi(e)
-		if expires != 0 {
-			token.expiry = time.Now().Add(time.Duration(expires) * time.Second)
-		}
-	default:
-		token = &tokenEntity{}
-		if err = json.Unmarshal(body, token); err != nil {
-			return nil, err
-		}
+	if contentType != "application/json" {
+		return nil, fmt.Errorf("oauth2: invalid Content-Type in response: %v", contentType)
 	}
-	if token.AccessToken == "" {
-		return nil, fmt.Errorf("oauth2: server response missing access_token")
+	token = &tokenEntity{}
+	if err = json.Unmarshal(body, token); err != nil {
+		return nil, err
 	}
+	if token.ExpiresIn != 0 {
+		token.expiry = time.Now().Add(time.Duration(token.ExpiresIn) * time.Second)
+	}
+
 	return token, nil
 }
 
