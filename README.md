@@ -1,5 +1,4 @@
 [![CircleCI](https://circleci.com/gh/oinume/go-oauth2-client-sample/tree/master.svg?style=svg)](https://circleci.com/gh/oinume/go-oauth2-client-sample/tree/master)
-[![codecov](https://codecov.io/gh/oinume/go-oauth2-client-sample/branch/master/graph/badge.svg)](https://codecov.io/gh/oinume/go-oauth2-client-sample)
 
 # go-oauth2-client-sample
 Simple OAuth2 client implementation in Go. See following articles for details.
