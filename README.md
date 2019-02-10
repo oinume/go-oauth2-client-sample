@@ -34,3 +34,5 @@ make run
 ```
 
 You can access to http://localhost:2345 with a web browser after executing the command.
+
+Change `PORT` on .env if you want to change listening port.

@@ -11,10 +11,6 @@ import (
 	oauth2 "github.com/oinume/go-oauth2-client-sample"
 )
 
-var (
-	port = flag.Int("port", 2345, "Listen port. default is 2345")
-)
-
 func main() {
 	flag.Parse()
 	if err := run(); err != nil {
@@ -23,10 +19,14 @@ func main() {
 }
 
 func run() error {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "2345"
+	}
 	server := oauth2.NewServer(
 		strings.TrimSpace(os.Getenv("CLIENT_ID")),
 		strings.TrimSpace(os.Getenv("CLIENT_SECRET")),
 	)
-	fmt.Printf("Listening on %v\n", *port)
-	return http.ListenAndServe(fmt.Sprintf(":%v", *port), server.NewMux())
+	fmt.Printf("Listening on %v\n", port)
+	return http.ListenAndServe(fmt.Sprintf(":%v", port), server.NewMux())
 }
