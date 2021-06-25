@@ -1,11 +1,12 @@
 name: ci
 on:
   - push
-  - pull_request
 jobs:
   build:
     name: build
     runs-on: ubuntu-latest
+    env:
+      GO111MODULE: off
     steps:
       - name: Set up Go 1.16
         uses: actions/setup-go@v1
