@@ -1,4 +1,4 @@
-[![CircleCI](https://circleci.com/gh/oinume/go-oauth2-client-sample/tree/master.svg?style=svg)](https://circleci.com/gh/oinume/go-oauth2-client-sample/tree/master)
+[![CI](https://github.com/oinume/go-oauth2-client-sample/workflows/ci/badge.svg?query=branch%3Amaster)](https://github.com/oinume/go-oauth2-client-sample/actions/workflows/ci.yml?query=branch%3Amaster)
 
 # go-oauth2-client-sample
 Simple OAuth2 client implementation in Go. See following articles for details.
