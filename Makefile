@@ -1,5 +1,4 @@
 APP = oauth2-client-sample
-BASE_DIR = github.com/oinume/go-oauth2-client-sample
 PID = $(APP).pid
 GO_TEST ?= go test -v -race
 
@@ -8,7 +7,7 @@ all: build
 .PHONY: build
 build:
 	mkdir -p bin
-	go build -o bin/$(APP) $(BASE_DIR)/cmd/$(APP)
+	go build -o bin/$(APP) ./cmd/$(APP)
 
 clean:
 	${RM} $(APP)
